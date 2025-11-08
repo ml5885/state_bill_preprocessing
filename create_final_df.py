@@ -14,6 +14,8 @@ from pathlib import Path
 import yaml
 from tqdm import tqdm
 
+EXCLUDED_STATES = {'co', 'pr', 'dc'}
+
 
 def build_legislator_party_map(people_dir):
     """
@@ -70,7 +72,7 @@ def build_bill_metadata_map(bills_json_path, leg_party_map):
     Build a mapping from bill unique_id to (date, party).
     
     Returns dict: { unique_id: (date_string, party_abbrev) }
-    """
+    """    
     bill_map = {}
     opener = gzip.open if bills_json_path.endswith('.gz') else open
     mode = "rt"
@@ -90,6 +92,10 @@ def build_bill_metadata_map(bills_json_path, leg_party_map):
             obj = json.loads(line)
             uid = obj.get('unique_id')
             if not uid:
+                continue
+
+            state = str(obj.get('state', '')).lower()
+            if state in EXCLUDED_STATES:
                 continue
 
             # Extract date
@@ -126,7 +132,7 @@ def build_bill_metadata_map(bills_json_path, leg_party_map):
 
 
 def augment_chunks_csv(chunks_csv_path, bill_map, use_party, out_csv_path):
-    """Augment chunks CSV with date and user_type columns."""
+    """Augment chunks CSV with date and user_type columns."""    
     # Pre-count rows for progress bar
     total_rows = None
     with open(chunks_csv_path, 'r', encoding='utf-8') as tmp:
@@ -149,6 +155,9 @@ def augment_chunks_csv(chunks_csv_path, bill_map, use_party, out_csv_path):
         for row in tqdm(reader, total=total_rows, desc="Augmenting chunks", unit="rows"):
             uid = row.get('unique_id')
             state = (row.get('state') or '').strip().lower()
+
+            if state in EXCLUDED_STATES:
+                continue
 
             date_str, party = bill_map.get(uid, ('', 'UNK'))
 

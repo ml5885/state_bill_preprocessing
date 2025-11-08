@@ -50,8 +50,8 @@ def main():
         if not chunks_csv_path.exists():
             raise SystemExit(f"Missing chunks CSV for analysis: {chunks_csv_path}")
 
-        df_clean = pd.read_csv(cleaned_csv_path)
-        df_chunks = pd.read_csv(chunks_csv_path)
+        df_clean = pd.read_csv(cleaned_csv_path, dtype={'session': str})
+        df_chunks = pd.read_csv(chunks_csv_path, dtype={'session': str})
 
         if args.state:
             state = args.state.lower()
@@ -73,7 +73,7 @@ def main():
                 'words_after': int(wa),
             }
 
-        print("=== Boilerplate Removal Stats ===")
+        print("\n=== Boilerplate Removal Stats ===")
         boilerplate.print_summary_table(stats)
         print("\n=== Chunking Stats ===")
         chunking.print_chunk_stats(df_chunks)
@@ -82,7 +82,9 @@ def main():
     # Step 1: Remove boilerplate and write cleaned CSV
     print("[Step 1] Removing boilerplate...")
     states = [args.state.lower()] if args.state else None
+    
     df_clean, stats = boilerplate.process_bills(args.input, states=states)
+    
     df_clean.to_csv(cleaned_csv_path, index=False)
     print(f"Wrote cleaned CSV to {cleaned_csv_path}")
     boilerplate.print_summary_table(stats)
@@ -92,10 +94,21 @@ def main():
     gc.collect()
 
     # Step 2: Chunk cleaned documents (streamed to avoid memory issues)
-    print("\n[Step 2] Chunking cleaned documents (streaming)...")
-    chunk_stats = chunking.chunk_csv(str(cleaned_csv_path), str(chunks_csv_path), chunksize=1000)
+    print("\n[Step 2] Chunking cleaned documents...")
+    
+    spot_check_dir = outdir / "spot_check"
+    chunk_stats = chunking.chunk_csv(
+        str(cleaned_csv_path), 
+        str(chunks_csv_path), 
+        chunksize=1000,
+        spot_check_dir=str(spot_check_dir)
+    )
+    
     print(f"Wrote chunked CSV to {chunks_csv_path}")
     chunking.print_chunk_stats_summary(chunk_stats)
+    
+    print(f"\nSpot check files saved to {spot_check_dir}/")
+    print("Review these files to verify chunking quality.")
 
 
 if __name__ == "__main__":

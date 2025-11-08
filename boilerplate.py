@@ -8,6 +8,7 @@ normalized sentences within each state's corpus.
 import gzip
 import json
 import re
+from collections import defaultdict
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -19,6 +20,11 @@ SPLIT_RE = re.compile(r'(?<=[.!?])\s+|\n{2,}|;\s+')
 LINE_NUM_RE = re.compile(r"(?m)(^[ \t]*\d{1,4}[.)]?[ \t]+)|([ \t]+\d{1,4}[.)]?[ \t]*$)")
 BOUNDARY_WS_AFTER_PUNCT_RE = re.compile(r'(?<=[.!?;])\s+')
 BOUNDARY_NEWLINE_RUN_RE = re.compile(r'\n{2,}')
+
+# Regex patterns for detecting XML/HTML/PDF metadata junk
+XML_TAG_RE = re.compile(r'<[^>]+>')
+PDF_METADATA_RE = re.compile(r'^\s*/[A-Za-z]+\s+', re.MULTILINE)
+DICT_MARKER_RE = re.compile(r'<<|>>')
 
 
 def sentences(text, min_chars=40, min_tokens=6, max_chars=5000):
@@ -40,10 +46,111 @@ def normalize_sentence(sentence):
     return " ".join(sentence.split())
 
 
+def is_metadata_junk(text):
+    """
+    Detect if text is likely XML/HTML/PDF metadata junk.
+    
+    Returns True if the text appears to be technical metadata that should be removed.
+    """
+    if not text or not text.strip():
+        return False
+    
+    text_stripped = text.strip()
+    lines = text_stripped.split('\n')
+    
+    # Check for high density of XML tags
+    tag_count = len(XML_TAG_RE.findall(text_stripped))
+    if tag_count > 5:  # More than 5 XML tags
+        return True
+    
+    # Check for PDF metadata patterns
+    pdf_lines = 0
+    dict_markers = 0
+    
+    for line in lines:
+        line_stripped = line.strip()
+        if not line_stripped:
+            continue
+            
+        # Lines starting with /PropertyName
+        if PDF_METADATA_RE.match(line):
+            pdf_lines += 1
+        
+        # Check for dictionary markers
+        if DICT_MARKER_RE.search(line):
+            dict_markers += 1
+        
+        # Check for patterns like /Property value or /Property
+        if line_stripped.startswith('/') and len(line_stripped.split()) <= 3:
+            pdf_lines += 1
+    
+    # If more than 30% of non-empty lines look like PDF metadata, it's junk
+    non_empty_lines = len([l for l in lines if l.strip()])
+    if non_empty_lines > 0:
+        pdf_ratio = pdf_lines / non_empty_lines
+        if pdf_ratio > 0.3:
+            return True
+    
+    # If we have multiple dictionary markers, likely PDF metadata
+    if dict_markers >= 3:
+        return True
+    
+    # Check for common PDF/XML keywords in high density
+    junk_keywords = ['/sRGBProfile', '/ColorConversion', '/EmbedFont', 
+                     '/CompressObjects', '/ImageMemory', '/ParseDSC',
+                     '/QFactor', '/HSamples', '/VSamples', '/TileWidth',
+                     'Arial-Black', 'TimesNewRoman', 'CourierNew']
+    
+    keyword_count = sum(1 for kw in junk_keywords if kw in text_stripped)
+    if keyword_count >= 3:
+        return True
+    
+    return False
+
+
+def clean_metadata_junk(text):
+    """
+    Remove XML/HTML tags and PDF metadata junk from text.
+    
+    This is applied before boilerplate detection to remove technical artifacts.
+    """
+    if not text:
+        return text
+    
+    # Remove XML/HTML tags
+    text = XML_TAG_RE.sub(' ', text)
+    
+    # Split into lines and filter out PDF metadata
+    lines = text.split('\n')
+    cleaned_lines = []
+    
+    for line in lines:
+        line_stripped = line.strip()
+        
+        # Skip lines that start with PDF properties
+        if PDF_METADATA_RE.match(line):
+            continue
+        
+        # Skip lines with dictionary markers if they're short
+        if DICT_MARKER_RE.search(line) and len(line_stripped.split()) <= 5:
+            continue
+        
+        # Skip very short lines that start with /
+        if line_stripped.startswith('/') and len(line_stripped.split()) <= 2:
+            continue
+        
+        cleaned_lines.append(line)
+    
+    return '\n'.join(cleaned_lines)
+
+
 def remove_boilerplate(text, boilerplate_keys):
     """Remove boilerplate sentences and line numbers from bill text."""
     if not text:
         return (0, 0, "")
+
+    # First, clean XML/HTML/PDF metadata junk
+    text = clean_metadata_junk(text)
 
     text_no_linenum = LINE_NUM_RE.sub('', text)
     sents = sentences(text_no_linenum)
@@ -73,8 +180,11 @@ def remove_boilerplate(text, boilerplate_keys):
         if not segment.strip():
             kept_parts.append(segment)
             continue
-        if normalize_sentence(segment) in boilerplate_keys:
-            continue
+        normalized = normalize_sentence(segment)
+        if normalized in boilerplate_keys:
+            stripped = segment.strip()
+            if len(stripped) >= 40 and len(stripped.split()) >= 6:
+                continue
         kept_parts.append(segment)
 
     cleaned_text = "".join(kept_parts)
@@ -118,6 +228,8 @@ def process_bills(input_path, min_ratio=0.10, min_docs=5, states=None):
         else:
             raise FileNotFoundError(f"Input not found: {input_path}")
 
+    # Exclude Colorado, Puerto Rico, and DC from all processing
+    excluded_states = {'co', 'pr', 'dc'}
     allowed_states = set(s.strip().lower() for s in states) if states else None
 
     current_state = None
@@ -130,6 +242,12 @@ def process_bills(input_path, min_ratio=0.10, min_docs=5, states=None):
         nonlocal sample_texts, state_records, cleaned_rows
 
         if not state:
+            return
+
+        # Skip excluded states
+        if state in excluded_states:
+            sample_texts = []
+            state_records = []
             return
 
         if allowed_states is not None and state not in allowed_states:
@@ -234,6 +352,10 @@ def process_bills(input_path, min_ratio=0.10, min_docs=5, states=None):
             if not state:
                 continue
 
+            # Skip excluded states
+            if state in excluded_states:
+                continue
+
             if current_state is None:
                 current_state = state
             elif state != current_state:
@@ -243,7 +365,10 @@ def process_bills(input_path, min_ratio=0.10, min_docs=5, states=None):
             if allowed_states is None or state in allowed_states:
                 text = obj.get("bill_document_last") or obj.get("bill_document_first")
                 if text and text.strip():
-                    sample_texts.append(text)
+                    # Clean metadata junk before adding to sample
+                    cleaned = clean_metadata_junk(text)
+                    if cleaned and cleaned.strip():
+                        sample_texts.append(cleaned)
                 state_records.append(obj)
 
         finalize_state(current_state)
