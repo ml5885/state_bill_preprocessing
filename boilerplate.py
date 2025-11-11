@@ -144,6 +144,72 @@ def clean_metadata_junk(text):
     return '\n'.join(cleaned_lines)
 
 
+def remove_hardcoded_boilerplate(text):
+    """
+    Remove specific hardcoded boilerplate text patterns.
+    
+    This includes:
+    - Membership/compensation tables
+    - Census/redistricting number lists
+    - Tabs not preceded by newlines (preserve \n\t+ patterns for chunking)
+    - Long runs of periods
+    """
+    if not text:
+        return text
+    
+    # Remove tab characters NOT preceded by newline (preserve \n\t+ patterns)
+    # These \n\t+ patterns are important paragraph markers for chunking
+    text = re.sub(r'(?<!\n)\t+', ' ', text)
+    
+    # Remove runs of 4 or more periods
+    text = re.sub(r'\.{4,}', ' ', text)
+    
+    # Remove specific hardcoded text patterns (case-insensitive)
+    # Membership table boilerplate
+    membership_pattern = re.compile(
+        r'Membership\s+Class\s*Percentage\s+of\s*Gross\s*Compensation\s*,?\s*Effective\s+July\s+1,\s*2011\s*2009',
+        re.IGNORECASE
+    )
+    text = membership_pattern.sub('', text)
+    
+    # Remove census/redistricting number lists
+    # Florida pattern: "to be designated by such numbers as follows:"
+    florida_redistricting = re.compile(
+        r'to\s+be\s+designated\s+by\s+such\s+numbers\s+as\s+follows:.*?(?=\n\s*\([a-z]\)|\n\s*Section|\n\s*SECTION|$)',
+        re.IGNORECASE | re.DOTALL
+    )
+    text = florida_redistricting.sub('', text)
+    
+    # Michigan pattern: "For terms of office beginning on or after"
+    michigan_redistricting = re.compile(
+        r'For\s+terms\s+of\s+office\s+beginning\s+on\s+or\s+after\s+[^:]+:\s*the\s+districts\s+are\s+constituted\s+and\s+numbered\s+as\s+follows:.*?(?=\n\s*\([a-z]\)|\n\s*Section|\n\s*SECTION|$)',
+        re.IGNORECASE | re.DOTALL
+    )
+    text = michigan_redistricting.sub('', text)
+    
+    # Remove long runs of enumerated items that are likely redistricting data
+    # Pattern: blocks/tracts with many numbers in sequence
+    # Look for patterns like "blocks 1234, 5678, 9012" with many numbers
+    redistricting_blocks = re.compile(
+        r'(?:blocks?|tracts?)\s+\d+(?:\s*,\s*\d+){20,}',  # 20+ comma-separated numbers
+        re.IGNORECASE
+    )
+    text = redistricting_blocks.sub('', text)
+    
+    # Remove voting tabulation district lists
+    vtd_pattern = re.compile(
+        r'(?:All\s+of\s+)?voting\s+tabulation\s+districts?\s+\d+(?:\s*,\s*\d+){10,}',
+        re.IGNORECASE
+    )
+    text = vtd_pattern.sub('', text)
+    
+    # Clean up multiple spaces and newlines left by removals
+    text = re.sub(r' {2,}', ' ', text)
+    text = re.sub(r'\n{3,}', '\n\n', text)
+    
+    return text
+
+
 def remove_boilerplate(text, boilerplate_keys):
     """Remove boilerplate sentences and line numbers from bill text."""
     if not text:
@@ -151,6 +217,9 @@ def remove_boilerplate(text, boilerplate_keys):
 
     # First, clean XML/HTML/PDF metadata junk
     text = clean_metadata_junk(text)
+    
+    # Remove hardcoded boilerplate patterns
+    text = remove_hardcoded_boilerplate(text)
 
     text_no_linenum = LINE_NUM_RE.sub('', text)
     sents = sentences(text_no_linenum)
@@ -286,32 +355,14 @@ def process_bills(input_path, min_ratio=0.10, min_docs=5, states=None):
         words_after = 0
 
         for obj in state_records:
-            # First version
-            b1, a1, c1 = remove_boilerplate(obj.get("bill_document_first"), boilerplate_keys)
-            if b1 > 0:
+            # Only process the last version of each bill
+            b, a, c = remove_boilerplate(obj.get("bill_document_last"), boilerplate_keys)
+            if b > 0:
                 docs_count += 1
-                words_before += b1
-                words_after += a1
-                if c1:
-                    cleaned_rows.append(CleanedDoc(
-                        state=state,
-                        session=obj.get("session"),
-                        bill_id=obj.get("bill_id"),
-                        unique_id=obj.get("unique_id"),
-                        sunlight_id=obj.get("sunlight_id"),
-                        bill_version="first",
-                        bill_text=c1,
-                        words_before=b1,
-                        words_after=a1,
-                    ))
-
-            # Last version
-            b2, a2, c2 = remove_boilerplate(obj.get("bill_document_last"), boilerplate_keys)
-            if b2 > 0:
-                docs_count += 1
-                words_before += b2
-                words_after += a2
-                if c2:
+                words_before += b
+                words_after += a
+                bills_with_text += 1
+                if c:
                     cleaned_rows.append(CleanedDoc(
                         state=state,
                         session=obj.get("session"),
@@ -319,13 +370,10 @@ def process_bills(input_path, min_ratio=0.10, min_docs=5, states=None):
                         unique_id=obj.get("unique_id"),
                         sunlight_id=obj.get("sunlight_id"),
                         bill_version="last",
-                        bill_text=c2,
-                        words_before=b2,
-                        words_after=a2,
+                        bill_text=c,
+                        words_before=b,
+                        words_after=a,
                     ))
-
-            if b1 > 0 or b2 > 0:
-                bills_with_text += 1
 
         per_state_stats[state] = {
             "bills_total": bills_total,
@@ -363,7 +411,8 @@ def process_bills(input_path, min_ratio=0.10, min_docs=5, states=None):
                 current_state = state
 
             if allowed_states is None or state in allowed_states:
-                text = obj.get("bill_document_last") or obj.get("bill_document_first")
+                # Only use bill_document_last for consistency
+                text = obj.get("bill_document_last")
                 if text and text.strip():
                     # Clean metadata junk before adding to sample
                     cleaned = clean_metadata_junk(text)
@@ -397,8 +446,8 @@ def print_summary_table(stats):
     total_before = 0
     total_after = 0
     rows = []
-
-    for state in sorted(stats.keys()):
+    
+    for state in tqdm(sorted(stats.keys()), desc="Preparing summary table"):
         s = stats[state]
         bills_total = s["bills_total"]
         bills_with_text = s["bills_with_text"]

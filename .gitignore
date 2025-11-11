@@ -12,16 +12,21 @@ venv/
 ENV/
 
 # Data files
+*.gz
 *.json
 *.json.gz
 *.csv
 *.pkl
 *.parquet
+*.chunks.csv
 
 # Output directories
 output/
-preprocess_output/
+*preprocess_output/
+spot_check/
 people/
+state_bills/
+scratch/
 
 # IDEs
 .vscode/
@@ -33,3 +38,5 @@ people/
 # OS
 .DS_Store
 Thumbs.db
+
+*.html

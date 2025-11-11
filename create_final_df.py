@@ -9,10 +9,15 @@ import csv
 import gzip
 import json
 import os
+import random
+import sys
+from collections import Counter
 from pathlib import Path
 
 import yaml
 from tqdm import tqdm
+
+csv.field_size_limit(sys.maxsize)
 
 EXCLUDED_STATES = {'co', 'pr', 'dc'}
 
@@ -132,7 +137,10 @@ def build_bill_metadata_map(bills_json_path, leg_party_map):
 
 
 def augment_chunks_csv(chunks_csv_path, bill_map, use_party, out_csv_path):
-    """Augment chunks CSV with date and user_type columns."""    
+    """Augment chunks CSV with date and user_type columns.
+    
+    Returns a dict with statistics about the processed data.
+    """    
     # Pre-count rows for progress bar
     total_rows = None
     with open(chunks_csv_path, 'r', encoding='utf-8') as tmp:
@@ -141,6 +149,12 @@ def augment_chunks_csv(chunks_csv_path, bill_map, use_party, out_csv_path):
     dirpath = os.path.dirname(out_csv_path)
     if dirpath:
         os.makedirs(dirpath, exist_ok=True)
+
+    chunk_lengths = []
+    user_type_counts = Counter()
+    date_counts = Counter()
+    all_rows = []
+    rows_written = 0
 
     with open(chunks_csv_path, 'r', encoding='utf-8') as infile, \
          open(out_csv_path, 'w', encoding='utf-8', newline='') as outfile:
@@ -170,6 +184,26 @@ def augment_chunks_csv(chunks_csv_path, bill_map, use_party, out_csv_path):
             row['date'] = date_str
             row['user_type'] = user_type
             writer.writerow(row)
+            
+            rows_written += 1
+            chunk_text = row.get('text', '')
+            chunk_lengths.append(len(chunk_text))
+            user_type_counts[user_type] += 1
+            if date_str:
+                date_counts[date_str[:4]] += 1
+            
+            if len(all_rows) < 10000:
+                all_rows.append(row.copy())
+            elif random.random() < 0.01:
+                all_rows[random.randint(0, len(all_rows) - 1)] = row.copy()
+
+    return {
+        'rows_written': rows_written,
+        'chunk_lengths': chunk_lengths,
+        'user_type_counts': user_type_counts,
+        'date_counts': date_counts,
+        'sample_rows': all_rows
+    }
 
 
 def main():
@@ -213,8 +247,53 @@ def main():
     print(f"Mapped {len(bill_map)} bills to date & party")
 
     print("Augmenting chunks CSV...")
-    augment_chunks_csv(args.chunks_csv, bill_map, args.use_party, args.out_csv)
+    stats = augment_chunks_csv(args.chunks_csv, bill_map, args.use_party, args.out_csv)
     print(f"Wrote augmented CSV to {args.out_csv}")
+    
+    print("\n" + "="*60)
+    print("SPOT CHECK & STATISTICS")
+    print("="*60)
+    
+    print(f"\nTotal rows written: {stats['rows_written']:,}")
+    
+    if stats['chunk_lengths']:
+        chunk_lengths = stats['chunk_lengths']
+        print(f"\nChunk length statistics:")
+        print(f"   Mean: {sum(chunk_lengths) / len(chunk_lengths):.1f} chars")
+        print(f"   Min: {min(chunk_lengths)} chars")
+        print(f"   Max: {max(chunk_lengths)} chars")
+        print(f"   Median: {sorted(chunk_lengths)[len(chunk_lengths)//2]} chars")
+    
+    print(f"\nUser type distribution (top 20):")
+    for user_type, count in stats['user_type_counts'].most_common(20):
+        pct = 100 * count / stats['rows_written']
+        print(f"   {user_type:20s}: {count:6,} ({pct:5.2f}%)")
+    
+    total_user_types = len(stats['user_type_counts'])
+    if total_user_types > 20:
+        print(f"   ... and {total_user_types - 20} more user types")
+    
+    if stats['date_counts']:
+        print(f"\nDate distribution by year (top 10):")
+        for year, count in sorted(stats['date_counts'].most_common(10)):
+            pct = 100 * count / stats['rows_written']
+            print(f"   {year}: {count:6,} ({pct:5.2f}%)")
+    
+    sample_size = min(5, len(stats['sample_rows']))
+    if sample_size > 0:
+        print(f"\nRandom sample of {sample_size} rows:")
+        sample_rows = random.sample(stats['sample_rows'], sample_size)
+        for i, row in enumerate(sample_rows, 1):
+            print(f"\n   --- Sample {i} ---")
+            print(f"   unique_id: {row.get('unique_id', 'N/A')}")
+            print(f"   state: {row.get('state', 'N/A')}")
+            print(f"   user_type: {row.get('user_type', 'N/A')}")
+            print(f"   date: {row.get('date', 'N/A')}")
+            text = row.get('text', '')
+            print(f"   text (first 100 chars): {text[:100]}...")
+            print(f"   text length: {len(text)} chars")
+    
+    print("\n" + "="*60)
 
 
 if __name__ == '__main__':

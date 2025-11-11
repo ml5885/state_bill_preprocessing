@@ -14,7 +14,7 @@ source .venv/bin/activate
 pip install -r requirements.txt
 ```
 
-Run the pipeline:
+Run the pipeline (this takes roughly 2 hours on a Macbook Pro with 16GB RAM):
 
 ```bash
 # Step 1: Remove boilerplate and chunk bills
