@@ -115,7 +115,14 @@ def main():
     print("[Step 1] Removing boilerplate...")
     states = [args.state.lower()] if args.state else None
     
-    df_clean, stats = boilerplate.process_bills(args.input, states=states)
+    df_clean, stats = boilerplate.process_bills(
+        args.input, 
+        states=states,
+        min_ratio=0.05,
+        tiny_chunk_min=100,
+        tiny_chunk_max=100,
+        aggressive_ratio=0.01
+    )
     
     df_clean.to_csv(cleaned_csv_path, index=False)
     print(f"Wrote cleaned CSV to {cleaned_csv_path}")

@@ -16,11 +16,10 @@ import numpy as np
 import pandas as pd
 from tqdm import tqdm
 
-# Minimum chunk length in characters
-MIN_CHUNK_LENGTH = 300
+MIN_CHUNK_LENGTH = 250
+HARD_MIN_CHUNK_LENGTH = 250
 
-# Maximum chunk length in characters - chunks longer than this may be split
-MAX_CHUNK_LENGTH = 1000
+MAX_CHUNK_LENGTH = 750
 
 # Regex patterns for section headings
 # Pattern for section headings at start of line or after newline
@@ -34,25 +33,22 @@ SECTION_ANY_RE = re.compile(
     r'(?:\b|(?<=\W))(Section\s+\d+[A-Za-z]?\.?|Sec\.\s*\d+[A-Za-z]?\.?|SEC\.\s*\d+[A-Za-z]?\.?|SECTION\s+\d+[A-Za-z]?\.?|SECTION\s+AUTONUMLGL\s+\\e\s*\.?|S\s+\d+\.)',
 )
 
-# Pattern for subsections: (a), (1), (A), (i), etc.
-# Match at start of line (after newline or at beginning) OR after punctuation like : or ;
+# Subsection markers like "(a)" or "(1)". Allow line-start or after sentence punctuation.
 SUBSECTION_RE = re.compile(
-    r'(?:^|\n|(?<=:)\s+|(?<=;)\s+)(\s*)(\([a-zA-Z]\)|\([ivxlcdm]+\)|\(\d+\))',
+    r'(?:^|\n|(?<=[\.:;\)\]])\s+)(\s*)(\([a-zA-Z]\)|\([ivxlcdm]+\)|\(\d+\))',
     re.IGNORECASE | re.MULTILINE
 )
 
-# Pattern for numeric subsections: "1.", "2.", "A.", "B.", etc.
-# Match at start of line (after newline) OR after punctuation like : or ;
+# Numeric/lettered subsections like "1." or "A."
 NUMERIC_SUBSECTION_RE = re.compile(
-    r'(?:^|\n|(?<=:)\s+|(?<=;)\s+)(\s*)(\d+\.|[A-Z]\.)',
+    r'(?:^|\n|(?<=[\.:;\)\]])\s+)(\s*)(\d+\.|[A-Z]\.)',
     re.MULTILINE
 )
 
-# Pattern for subsections in no-newline text (more relaxed)
-# Matches (a), (1), (A), etc. after periods, colons, semicolons, or closing brackets
+# No-newline subsections: require preceding punctuation to avoid mid-sentence matches.
 SUBSECTION_NO_NEWLINE_RE = re.compile(
-    r'(?:[\.;:\])\s+)(\([a-zA-Z]\)|\([ivxlcdm]+\)|\(\d+\))',
-    re.IGNORECASE
+    r'(?<=[\.:;\)\]])\s*(\([a-zA-Z]\)|\([ivxlcdm]+\)|\(\d+\))',
+    re.IGNORECASE,
 )
 
 # Pattern for paragraph breaks: newline followed by tabs/spaces (common in legal text)
@@ -73,8 +69,128 @@ def decide_newline_threshold(text):
     return 2
 
 
-def split_into_chunks(text):
-    """Split a bill document into paragraph-like chunks."""
+def split_to_sections_by_state(text, state):
+    """
+    Split bill text into sections using state-specific patterns.
+    Based on original data provider's cleaning code.
+    From https://github.com/desmarais-lab/text_reuse/
+    """
+    if state == 'ak':
+        chunked_list = text.split("\n*")
+    elif state in ('al', 'ar', 'mt', 'or', 'ri'):
+        chunked_list = text.split('\nsection')
+    elif state in ('nm', 'tx'):
+        chunked_list = text.split('\n section')
+    elif state in ('az', 'ia', 'nv', 'wa', 'vt'):
+        chunked_list = text.split('\nsec.')
+    elif state in ('me', 'mi'):
+        chunked_list = text.split('\n sec.')
+    elif state == 'co':
+        chunked_list = re.split(r'[[0-9][0-9]\.section|[0-9]\.section', text)
+    elif state in ('de', 'fl', 'tn'):
+        chunked_list = re.split(r'section\s[0-9][0-9]\.|section\s[0-9]\.', text)
+    elif state == 'ga':
+        text = re.sub(r'[0-9][0-9]\n|[0-9]\n', ' ', text)
+        chunked_list = re.split(r'\nsection\s[0-9][0-9]|\nsection\s[0-9]', text)
+    elif state in ('hi', 'sd', 'in'):
+        chunked_list = re.split(r'\n\ssection\s[0-9][0-9]\.|\n\ssection\s[0-9]', text)
+    elif state == 'pa':
+        chunked_list = re.split(r'section\s[0-9][0-9]\.|section\s[0-9]\.', text)
+    elif state in ('id', 'la', 'md', 'nd'):
+        chunked_list = re.split(r'\nsection\s[0-9][0-9]\.|\nsection\s[0-9]\.', text)
+    elif state == 'il':
+        text = re.sub(r'\n\s[0-9][0-9]|\n\s[0-9]', ' ', text)
+        chunked_list = re.split(r'\n\s\ssection\s', text)
+    elif state == 'sc':
+        chunked_list = text.split('\n \n')
+    elif state == 'ks':
+        chunked_list = re.split(r'\nsection\s|sec\.', text)
+    elif state in ('ne', 'mn'):
+        chunked_list = re.split(r'\ssection\s[0-9]\.|\ssec.\s[0-9][0-9]\.|\ssec.\s[0-9]\.', text)
+    elif state == 'ky':
+        chunked_list = text.split('\n\n\n section .')
+    elif state == 'ms':
+        chunked_list = text.split('\n\n\n section ')
+    elif state in ('ma', 'nc', 'oh', 'ut'):
+        chunked_list = re.split(r'\ssection\s[0-9][0-9]\.|\ssection\s[0-9]\.', text)
+    elif state == 'mo':
+        chunked_list = re.split(r'\n\s[0-9][0-9]\.\s|\n\s[0-9]\.\s', text)
+    elif state == 'nh':
+        chunked_list = re.split(r'\n\n[0-9][0-9]\s|\n\n[0-9]\s', text)
+    elif state == 'nj':
+        chunked_list = re.split(r'\n\n\s[0-9][0-9]\.\s|\n\n\s[0-9]\.\s', text)
+    elif state == 'ny':
+        chunked_list = re.split(r'\ssection\s[0-9]\.|\.\ss\s[0-9]\.', text)
+    elif state == 'ok':
+        chunked_list = re.split(r'\nsection\s\.\s', text)
+    elif state == 'va':
+        chunked_list = re.split(r'(([A-Z])|[0-9][0-9])\.\s|(([A-Z])|[0-9])\.\s', text)
+    elif state == 'wi':
+        chunked_list = re.split(r'\n[0-9][0-9]section\s\n|\n[0-9]section\s\n', text)
+    elif state == 'wv':
+        chunked_list = re.split(r'\n\s\([a-z]\)\s', text)
+    elif state == 'wy':
+        chunked_list = re.split(r'\ssection\s[0-9][0-9]\.|\ssection\s[0-9]\.', text)
+    elif state == 'ca':
+        chunked_list = re.split(r'section\s[0-9]\.|sec.\s[0-9][0-9]\.|sec.\s[0-9]\.', text)
+    else:
+        chunked_list = [text]
+    
+    # Delete empty sections
+    chunked_list = [x for x in chunked_list if x is not None and len(x) > 2]
+    
+    # Delete number lines for specific states
+    if state in ['or', 'ok', 'ne', 'pa']:
+        re_string = r'\n\s[0-9][0-9]|\n[0-9][0-9]|\n[0-9]|\n\s[0-9]'
+        chunked_list = [re.sub(re_string, '', t) for t in chunked_list]
+    
+    # Delete multiple new lines and spaces for each section
+    chunked_list = [re.sub(r'\s+', ' ', x) for x in chunked_list]
+    
+    return chunked_list
+
+def enforce_minimum_chunk_length(chunks, hard_min=None):
+    """Final pass to ensure no chunk is shorter than *hard_min* characters."""
+    if hard_min is None:
+        hard_min = HARD_MIN_CHUNK_LENGTH
+
+    if not chunks:
+        return []
+
+    merged = []
+    i = 0
+    n = len(chunks)
+
+    while i < n:
+        cur = chunks[i]
+        # Merge forward while below the floor and there is a next chunk
+        while len(cur) < hard_min and i + 1 < n:
+            i += 1
+            cur = cur + "\n\n" + chunks[i]
+        merged.append(cur)
+        i += 1
+
+    # If the final chunk is still short, merge it backward
+    if len(merged) >= 2 and len(merged[-1]) < hard_min:
+        merged[-2] = merged[-2] + "\n\n" + merged[-1]
+        merged.pop()
+
+    return merged
+
+def split_into_chunks(text, state=None, min_chars=None, max_chars=None):
+    """Split a bill document into paragraph-like chunks.
+    
+    Args:
+        text: bill text to chunk
+        state: optional two-letter state code for state-specific section splitting
+        min_chars: minimum characters for a chunk (default: MIN_CHUNK_LENGTH)
+        max_chars: maximum characters for a chunk (default: MAX_CHUNK_LENGTH)
+    """
+    if min_chars is None:
+        min_chars = MIN_CHUNK_LENGTH
+    if max_chars is None:
+        max_chars = MAX_CHUNK_LENGTH
+
     if not text:
         return []
 
@@ -84,20 +200,15 @@ def split_into_chunks(text):
 
     has_newlines = "\n" in text
     has_double_newlines = "\n\n" in text
-    
+
     if not has_newlines:
         boundaries = []
         
-        # Find Section boundaries
         for m in SECTION_ANY_RE.finditer(text):
             if m.start() > 0:
                 boundaries.append(m.start())
         
-        # Find subsection boundaries like (a), (1), etc.
-        # Use the relaxed pattern for no-newline text
         for m in SUBSECTION_NO_NEWLINE_RE.finditer(text):
-            # The pattern captures the subsection marker in group 1
-            # We want the boundary at the start of the '(' character
             match_text = text[m.start():m.end()]
             paren_pos = match_text.find('(')
             if paren_pos >= 0:
@@ -105,7 +216,6 @@ def split_into_chunks(text):
                 if boundary_pos > 0:
                     boundaries.append(boundary_pos)
         
-        # Find numeric subsections like "1.", "A.", etc.
         for m in NUMERIC_SUBSECTION_RE.finditer(text):
             match_text = text[m.start():m.end()]
             for i, ch in enumerate(match_text):
@@ -116,7 +226,6 @@ def split_into_chunks(text):
                     break
         
         boundaries = sorted(set(b for b in boundaries if 0 < b < len(text)))
-        
         starts = [0] + boundaries
         chunks = []
         for i in range(len(starts)):
@@ -125,8 +234,9 @@ def split_into_chunks(text):
             chunk = text[start:end].strip()
             if chunk:
                 chunks.append(chunk)
-        
-        return merge_short_chunks(chunks)
+        result = merge_short_chunks(chunks, min_chars=min_chars)
+        result = enforce_minimum_chunk_length(result, hard_min=min_chars)
+        return result
 
     double_runs = text.count("\n\n")
     isolated_runs = len(re.findall(r'(?<!\n)\n(?!\n)', text))
@@ -139,7 +249,7 @@ def split_into_chunks(text):
     if not has_double_newlines:
         section_relaxed_re = re.compile(
             r'(?:(?<=\s)|(?<=\W)|(?<=\.))'
-            r'(Section\s+\d+[A-Za-z]?\.?|Sec\.\s*\d+[A-Za-z]?\.?|SEC\.\s*\d+[A-Za-z]?\.?|SECTION\s+\d+[A-Za-z]?\.?|SECTION\s+AUTONUMLGL\s+\\e\s*\.?|S\s+\d+\.)'
+            r'(Section\s+\d+[A-Za-z]?\.?|Sec\.\s*\d+[A-Za-z]?\.?|SEC\.\s*\d+[A-Za-z]?\.?|SECTION\s+\d+[A-ZaZ]?\.?|SECTION\s+AUTONUMLGL\s+\\e\s*\.?|S\s+\d+\.)'
             r'(?=\s)',
         )
         for m in section_relaxed_re.finditer(text):
@@ -166,17 +276,16 @@ def split_into_chunks(text):
                     boundaries.append(boundary_pos)
                 break
     
-    # Add paragraph break boundaries (newline + tabs/spaces pattern)
     for m in PARAGRAPH_BREAK_RE.finditer(text):
         if m.start() > 0:
             boundaries.append(m.start())
-        
+    
     if threshold > 1:
         newline_pat = re.compile(r'\n{' + str(threshold) + ',}')
         for m in newline_pat.finditer(text):
             boundaries.append(m.start())
-    boundaries = sorted(set(b for b in boundaries if 0 < b < len(text)))
     
+    boundaries = sorted(set(b for b in boundaries if 0 < b < len(text)))
     starts = [0] + boundaries
     chunks = []
     for i in range(len(starts)):
@@ -185,7 +294,7 @@ def split_into_chunks(text):
         chunk = text[start:end].strip()
         if chunk:
             chunks.append(chunk)
-
+    
     if len(chunks) <= 1 and len(chunks[0]) < 500:
         lines = text.split("\n")
         cur = []
@@ -204,13 +313,10 @@ def split_into_chunks(text):
             heur.append("\n".join(cur).strip())
         if len(heur) > len(chunks):
             chunks = [c for c in heur if c]
-
-    result = merge_short_chunks(chunks)
     
-    # Split any chunks that are too long
-    total_bill_length = len(text)
-    result = split_long_chunks(result, total_bill_length)
-    
+    split_result = split_long_chunks(chunks, len(text), max_chars=max_chars, min_chars=min_chars)
+    result = merge_short_chunks(split_result, min_chars=min_chars)
+    result = enforce_minimum_chunk_length(result, hard_min=min_chars)
     return result
 
 
@@ -261,164 +367,86 @@ def validate_consecutive_sections(chunks):
     return protected
 
 
+def merge_short_chunks(chunks, min_chars=None):
+    # Merge chunks shorter than min_chars characters with neighbors iteratively.
+    if min_chars is None:
+        min_chars = MIN_CHUNK_LENGTH
 
-def is_bounded_section(chunk, prev_chunk=None, next_chunk=None):
-    """Check if a chunk should be protected from merging."""
-    chunk_stripped = chunk.strip()
-    current_num = extract_section_number(chunk_stripped)
-    
-    if current_num is not None:
-        if len(chunk_stripped) < MIN_CHUNK_LENGTH * 0.4: 
-            return False
-            
-        if next_chunk is not None:
-            next_stripped = next_chunk.strip()
-            next_num = extract_section_number(next_stripped)
-            if next_num is not None and next_num > current_num:
-                return True
-            return False
-        
-        return True
-    
-    subsection_start_re = re.compile(r'^(\([a-zA-Z0-9ivxlcdm]+\)|\d+\.|[A-Z]\.)\s+', re.IGNORECASE)
-    if subsection_start_re.match(chunk_stripped):
-        if len(chunk_stripped) < MIN_CHUNK_LENGTH * 0.6:
-            return False
-        
-        if next_chunk is not None:
-            next_stripped = next_chunk.strip()
-            if subsection_start_re.match(next_stripped):
-                return True
-        
-        return False
-    
-    return False
-
-
-def merge_short_chunks(chunks):
-    """Merge chunks shorter than MIN_CHUNK_LENGTH characters with neighbors iteratively.
-    
-    Algorithm illustration (assuming MIN_CHUNK_LENGTH=500):
-    
-    Initial state:
-        [100 chars] [200 chars] [50 chars] [600 chars] [300 chars] [80 chars]
-         chunk1      chunk2      chunk3     chunk4      chunk5      chunk6
-    
-    Iteration 1:
-        - chunk1 (100) < 500: merge with next -> [300] (merged chunk1+chunk2)
-        - chunk3 (50) < 500: merge with next -> [650] (merged chunk3+chunk4)
-        - chunk5 (300) < 500: merge with next -> [380] (merged chunk5+chunk6)
-
-        Result: [[300], [650], [380]]
-                 ^merge  ^keep   ^merge
-    
-    Iteration 2:
-        - [300] < 500: merge with next -> [950] (merged [300]+[650])
-        - [380] < 500: stays as-is (no next chunk available)
-        
-        Result: [[950], [380]]
-                 ^keep  ^short
-    
-    Iteration 3:
-        - No more merges possible (would require merging [380] backward into [950])
-        
-    Final: [[950], [380]]
-    
-    Special cases:
-        - Protected sections (consecutive SEC. N headers) are never merged
-        - When choosing merge direction, prefer forward if result <= MIN_CHUNK_LENGTH
-        - Otherwise prefer smaller total size (up to 2*MIN_CHUNK_LENGTH)
-    """
     if not chunks:
         return []
-    
+
     chunks = [c.strip() for c in chunks if c.strip()]
     if not chunks:
         return []
-    
+
     if len(chunks) == 1:
         return chunks
 
-    # Keep merging until all chunks are >= MIN_CHUNK_LENGTH (or we can't merge anymore)
-    max_iterations = len(chunks)
-    for iteration in range(max_iterations):
+    max_iters = max(3, len(chunks))
+    for _ in range(max_iters):
+        protected = validate_consecutive_sections(chunks)
         merged = []
         i = 0
         any_merged = False
-        
+
         while i < len(chunks):
             c = chunks[i]
-            
-            # If this chunk is long enough, keep it
-            if len(c) >= MIN_CHUNK_LENGTH:
+            is_prot = i in protected
+
+            if len(c) >= min_chars:
                 merged.append(c)
                 i += 1
                 continue
-            
-            prev_chunk = merged[-1] if len(merged) > 0 else None
-            next_chunk = chunks[i + 1] if i + 1 < len(chunks) else None
-            
-            if is_bounded_section(c, prev_chunk, next_chunk):
+
+            if is_prot and len(c) >= int(min_chars * 0.5):
                 merged.append(c)
                 i += 1
                 continue
-            
-            can_merge_prev = len(merged) > 0
-            can_merge_next = i + 1 < len(chunks)
-            
-            if can_merge_prev and can_merge_next:
-                prev_len = len(merged[-1])
-                next_len = len(chunks[i + 1])
-                curr_len = len(c)
-                
-                merge_prev_size = prev_len + curr_len
-                merge_next_size = curr_len + next_len
-                
-                if merge_next_size <= MIN_CHUNK_LENGTH or (merge_next_size < merge_prev_size and merge_next_size <= 2 * MIN_CHUNK_LENGTH):
+
+            if is_prot and len(c) < min_chars:
+                if i + 1 < len(chunks) and (i + 1) not in protected:
                     merged.append(c + "\n\n" + chunks[i + 1])
                     any_merged = True
                     i += 2
-                else:
+                    continue
+                if merged and (len(merged) - 1) not in protected:
                     merged[-1] = merged[-1] + "\n\n" + c
                     any_merged = True
                     i += 1
-                    
-            elif can_merge_prev:
-                merged[-1] = merged[-1] + "\n\n" + c
-                any_merged = True
+                    continue
+                merged.append(c)
                 i += 1
-                
-            elif can_merge_next:
+                continue
+
+            if i + 1 < len(chunks) and (i + 1) not in protected:
                 merged.append(c + "\n\n" + chunks[i + 1])
                 any_merged = True
                 i += 2
-                
-            else:
-                merged.append(c)
+                continue
+
+            if merged and (len(merged) - 1) not in protected:
+                merged[-1] = merged[-1] + "\n\n" + c
+                any_merged = True
                 i += 1
-        
+                continue
+
+            merged.append(c)
+            i += 1
+
         chunks = merged
-        
         if not any_merged:
             break
-    
+
     return chunks
 
 
-def split_long_chunks(chunks, total_bill_length):
-    """Split chunks that are too long based on certain conditions.
-    
-    A chunk is split if:
-    1. It's longer than MAX_CHUNK_LENGTH AND (there are fewer than 3 total chunks 
-       OR the chunk is >40% of total bill length)
-    2. The chunk contains newline characters
-    
-    When splitting:
-    - First try to split on subsection boundaries (most common structure)
-    - Then try section boundaries
-    - Otherwise split on newline characters
-    - After splitting, merge any resulting chunks that are too small
-    """
+def split_long_chunks(chunks, total_bill_length, max_chars=None, min_chars=None):
+    """Split chunks that are too long based on certain conditions."""
+    if max_chars is None:
+        max_chars = MAX_CHUNK_LENGTH
+    if min_chars is None:
+        min_chars = MIN_CHUNK_LENGTH
+
     if not chunks:
         return []
     
@@ -430,16 +458,7 @@ def split_long_chunks(chunks, total_bill_length):
         # Check if this chunk should be split
         should_split = False
         
-        # Condition 1: chunk is too long AND (few total chunks OR chunk is large portion of bill)
-        if chunk_len > MAX_CHUNK_LENGTH:
-            if len(chunks) < 3:
-                should_split = True
-            elif total_bill_length > 0 and chunk_len > 0.4 * total_bill_length:
-                should_split = True
-        
-        # Condition 2: chunk contains newlines and is too long
-        has_newlines = '\n' in chunk
-        if chunk_len > MAX_CHUNK_LENGTH and has_newlines:
+        if chunk_len > max_chars:
             should_split = True
         
         if not should_split:
@@ -494,70 +513,99 @@ def split_long_chunks(chunks, total_bill_length):
                 if sub_chunk:
                     sub_chunks.append(sub_chunk)
             
+            # Recursively check if sub-chunks need further splitting (e.g. by words if still too long)
+            final_sub_chunks = []
+            for sc in sub_chunks:
+                if len(sc) > max_chars:
+                    final_sub_chunks.extend(split_long_chunks([sc], 0, max_chars=max_chars, min_chars=min_chars))
+                else:
+                    final_sub_chunks.append(sc)
+
             # Merge sub-chunks that are too small
-            merged_sub_chunks = merge_short_chunks(sub_chunks)
+            merged_sub_chunks = merge_short_chunks(final_sub_chunks, min_chars=min_chars)
             result.extend(merged_sub_chunks)
         
         # Otherwise, if chunk has newlines, split on them
-        elif has_newlines:
+        elif '\n' in chunk:
             # Decide on newline threshold
             threshold = decide_newline_threshold(chunk)
+            newline_boundaries = []
+            
             if threshold > 1:
                 newline_pat = re.compile(r'\n{' + str(threshold) + ',}')
-                newline_boundaries = []
                 for m in newline_pat.finditer(chunk):
                     if m.start() > 0:
                         newline_boundaries.append(m.start())
-                
-                if newline_boundaries:
-                    newline_boundaries = sorted(set(newline_boundaries))
-                    starts = [0] + newline_boundaries
-                    sub_chunks = []
-                    for i in range(len(starts)):
-                        start = starts[i]
-                        end = starts[i + 1] if i + 1 < len(starts) else len(chunk)
-                        sub_chunk = chunk[start:end].strip()
-                        if sub_chunk:
-                            sub_chunks.append(sub_chunk)
-                    
-                    # Merge sub-chunks that are too small
-                    merged_sub_chunks = merge_short_chunks(sub_chunks)
-                    result.extend(merged_sub_chunks)
-                else:
-                    # Fallback: split on any newline
-                    sub_chunks = [s.strip() for s in chunk.split('\n') if s.strip()]
-                    merged_sub_chunks = merge_short_chunks(sub_chunks)
-                    result.extend(merged_sub_chunks)
-            else:
-                # Split on single newlines
+            
+            if not newline_boundaries:
+                # Fallback: split on any newline
                 sub_chunks = [s.strip() for s in chunk.split('\n') if s.strip()]
-                merged_sub_chunks = merge_short_chunks(sub_chunks)
-                result.extend(merged_sub_chunks)
+            else:
+                newline_boundaries = sorted(set(newline_boundaries))
+                starts = [0] + newline_boundaries
+                sub_chunks = []
+                for i in range(len(starts)):
+                    start = starts[i]
+                    end = starts[i + 1] if i + 1 < len(starts) else len(chunk)
+                    sub_chunk = chunk[start:end].strip()
+                    if sub_chunk:
+                        sub_chunks.append(sub_chunk)
+            
+            # Recursively check if sub-chunks need further splitting
+            final_sub_chunks = []
+            for sc in sub_chunks:
+                if len(sc) > max_chars:
+                    final_sub_chunks.extend(split_long_chunks([sc], 0, max_chars=max_chars, min_chars=min_chars))
+                else:
+                    final_sub_chunks.append(sc)
+
+            merged_sub_chunks = merge_short_chunks(final_sub_chunks, min_chars=min_chars)
+            result.extend(merged_sub_chunks)
+        
         else:
-            # Can't split, keep as-is
-            result.append(chunk)
+            # No structure found, split by words to enforce max_chars
+            words = chunk.split()
+            current_sub = []
+            current_len = 0
+            sub_chunks = []
+            
+            for w in words:
+                if current_len + len(w) + 1 > max_chars and current_sub:
+                    sub_chunks.append(" ".join(current_sub))
+                    current_sub = [w]
+                    current_len = len(w)
+                else:
+                    current_sub.append(w)
+                    current_len += len(w) + 1
+            
+            if current_sub:
+                sub_chunks.append(" ".join(current_sub))
+            
+            merged_sub_chunks = merge_short_chunks(sub_chunks, min_chars=min_chars)
+            result.extend(merged_sub_chunks)
     
     return result
 
 
-def chunk_dataframe(df):
+def chunk_dataframe(df, min_chars=None, max_chars=None):
     """Expand a DataFrame of cleaned bills into chunked rows."""
     chunk_rows = []
     for _, row in df.iterrows():
-        if row.get('bill_version') == "first":
+        if row['bill_version'] == "first":
             continue
 
-        text = row.get("bill_text", "") or ""
-        chunks = split_into_chunks(text)
+        text = row["bill_text"] or ""
+        state = row["state"]
+        chunks = split_into_chunks(text, state=state, min_chars=min_chars, max_chars=max_chars)
 
         for idx, chunk in enumerate(chunks, start=1):
             record = {
-                'state': row.get('state'),
-                'session': row.get('session'),
-                'bill_id': row.get('bill_id'),
-                'unique_id': row.get('unique_id'),
-                'sunlight_id': row.get('sunlight_id'),
-                'bill_version': row.get('bill_version'),
+                'state': row['state'],
+                'session': row['session'],
+                'bill_id': row['bill_id'],
+                'unique_id': row['unique_id'],
+                'sunlight_id': row['sunlight_id'],
+                'bill_version': row['bill_version'],
                 'chunk_id': f"chunk_{idx}",
                 'bill_text': chunk,
             }
@@ -566,7 +614,7 @@ def chunk_dataframe(df):
     return pd.DataFrame(chunk_rows)
 
 
-def chunk_csv(input_csv, output_csv, chunksize=1000, spot_check_dir=None):
+def chunk_csv(input_csv, output_csv, chunksize=1000, spot_check_dir=None, min_chars=None, max_chars=None):
     """Stream chunking from a cleaned CSV to an output CSV."""
     input_csv = str(input_csv)
     output_csv = str(output_csv)
@@ -579,7 +627,7 @@ def chunk_csv(input_csv, output_csv, chunksize=1000, spot_check_dir=None):
     wrote_any = False
 
     for df_clean in pd.read_csv(input_csv, chunksize=chunksize, dtype={'session': str}):
-        df_chunks = chunk_dataframe(df_clean)
+        df_chunks = chunk_dataframe(df_clean, min_chars=min_chars, max_chars=max_chars)
         if not df_chunks.empty:
             df_chunks.to_csv(output_csv, index=False, mode='a', header=first_write)
             first_write = False
