@@ -1,0 +1,467 @@
+<!DOCTYPE html>
+<html lang="en">
+    <head>
+        <meta charset="UTF-8" />
+        <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+        <title>Bill Chunks Spot Check Viewer</title>
+        <style>
+			* {
+				box-sizing: border-box;
+				margin: 0;
+				padding: 0;
+			}
+
+			body {
+				font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
+					Oxygen, Ubuntu, Cantarell, "Fira Sans", "Droid Sans", "Helvetica Neue",
+					Arial, sans-serif;
+				background: #fff;
+				color: #333;
+				line-height: 1.6;
+			}
+
+			.container {
+				max-width: 900px;
+				margin: 0 auto;
+				padding: 40px 20px;
+			}
+
+			.header {
+				border-bottom: 1px solid #e0e0e0;
+				padding-bottom: 30px;
+				margin-bottom: 40px;
+			}
+
+			.header h1 {
+				font-size: 2rem;
+				font-weight: 600;
+				color: #000;
+				margin-bottom: 8px;
+			}
+
+			.header p {
+				color: #666;
+				font-size: 1rem;
+			}
+
+			.upload-section {
+				margin-bottom: 40px;
+			}
+
+			.upload-box {
+				border: 2px dashed #ccc;
+				padding: 30px;
+				text-align: center;
+				cursor: pointer;
+				transition: border-color 0.2s;
+			}
+
+			.upload-box:hover {
+				border-color: #999;
+			}
+
+			.upload-box.dragover {
+				border-color: #666;
+				background: #f9f9f9;
+			}
+
+			.upload-box h3 {
+				font-size: 1.1rem;
+				font-weight: 600;
+				color: #333;
+				margin-bottom: 8px;
+			}
+
+			.upload-box p {
+				color: #666;
+				font-size: 0.95rem;
+				margin-bottom: 15px;
+			}
+
+			.file-input-label {
+				background: #000;
+				color: #fff;
+				padding: 8px 20px;
+				font-size: 0.9rem;
+				cursor: pointer;
+				transition: background 0.2s;
+				display: inline-block;
+			}
+
+			.file-input-label:hover {
+				background: #333;
+			}
+			#fileInput {
+				display: none;
+			}
+
+			.files-loaded {
+				margin-top: 15px;
+				padding: 12px;
+				background: #f0f8f0;
+				border-left: 3px solid #4caf50;
+				color: #2e7d32;
+				font-size: 0.9rem;
+			}
+
+			.bill-selector {
+				padding: 20px 0;
+				border-bottom: 1px solid #e0e0e0;
+				margin-bottom: 30px;
+				display: none;
+			}
+
+			.bill-selector label {
+				font-weight: 600;
+				color: #333;
+				margin-right: 12px;
+				font-size: 0.95rem;
+			}
+
+			.bill-selector select {
+				padding: 8px 12px;
+				border: 1px solid #ccc;
+				font-size: 0.95rem;
+				min-width: 300px;
+				cursor: pointer;
+				background: #fff;
+			}
+
+			.bill-selector select:focus {
+				outline: none;
+				border-color: #000;
+			}
+
+			.content {
+				display: none;
+			}
+
+			.metadata {
+				background: #f9f9f9;
+				padding: 20px;
+				margin-bottom: 30px;
+				border-left: 3px solid #000;
+				font-size: 0.9rem;
+			}
+
+			.metadata-item {
+				margin-bottom: 10px;
+			}
+
+			.metadata-item:last-child {
+				margin-bottom: 0;
+			}
+
+			.metadata-label {
+				font-weight: 600;
+				color: #666;
+				display: inline-block;
+				min-width: 120px;
+			}
+
+			.metadata-value {
+				color: #000;
+			}
+
+			.bill-text-container {
+				font-family: "Palatino", "Book Antiqua", Georgia, serif;
+				padding: 20px 0;
+				line-height: 1.8;
+				font-size: 1rem;
+				color: #333;
+				white-space: pre-wrap;
+				word-wrap: break-word;
+			}
+
+            .bill-nav {
+                gap: 20px;
+            }
+
+			.chunk-wrapper {
+				position: relative;
+				display: block;
+				margin-bottom: 1.2em;
+                cursor: pointer;
+			}
+
+			.chunk-text {
+				display: inline;
+				transition: background 0.15s ease;
+			}
+
+			.chunk-wrapper:hover .chunk-text {
+				background: #ffffcc;
+			}
+
+			.chunk-legend {
+				position: absolute;
+				top: 0;
+                right: 100%;
+                margin-right: 30px;
+				width: 150px;
+				font-size: 1rem;
+				color: #000;
+				display: none;
+			}
+
+			.chunk-wrapper:hover .chunk-legend {
+				display: flex;
+                flex-direction: column;
+                align-items: flex-end;
+			}
+
+			.chunk-legend-title {
+				font-weight: 600;
+				border-bottom: 1px solid #ccc;
+				font-size: 0.8rem;
+				letter-spacing: 0.5px;
+				text-transform: uppercase;
+			}
+
+			.chunk-legend-label {
+				font-weight: 600;
+				color: black;
+				display: inline-block;
+				min-width: 60px;
+			}
+		</style>
+    </head>
+    <body>
+        <div class="container">
+            <div class="header">
+                <h1>Bill Chunks Spot Check Viewer</h1>
+                <p>Upload spot check files to inspect bill chunking quality</p>
+            </div>
+            <div class="upload-section">
+                <div class="upload-box" id="uploadBox">
+                    <h3>Upload Spot Check Files</h3>
+                    <p>Drag and drop .txt files here, or click to browse</p>
+                    <label for="fileInput" class="file-input-label">Choose
+                        Files</label>
+                    <input type="file" id="fileInput" multiple accept=".txt" />
+                </div>
+                <div id="filesLoaded" class="files-loaded"
+                    style="display: none"></div>
+            </div>
+            <div class="bill-selector" id="billSelector"
+                style="display:none"></div>
+
+            <div class="bill-nav bill-nav-top" id="billNavTop"
+                style="display:none">
+                <button class="nav-btn" id="prevTop"
+                    aria-label="Previous bill">←</button>
+                <div class="bill-nav-label" id="billNavLabelTop">No bill
+                    loaded</div>
+                <button class="nav-btn" id="nextTop"
+                    aria-label="Next bill">→</button>
+            </div>
+            <div class="content" id="content">
+                <div class="metadata" id="metadata"></div>
+                <div class="bill-text-container" id="billText"></div>
+                <div class="bill-nav bill-nav-bottom" id="billNavBottom"
+                    style="display:none">
+                    <button class="nav-btn" id="prevBottom"
+                        aria-label="Previous bill">←</button>
+                    <div class="bill-nav-label" id="billNavLabelBottom">No bill
+                        loaded</div>
+                    <button class="nav-btn" id="nextBottom"
+                        aria-label="Next bill">→</button>
+                </div>
+            </div>
+        </div>
+        <script>
+			let billsData = {};
+			let billKeys = [];
+			let currentIndex = -1;
+			const fileInput = document.getElementById("fileInput");
+			const uploadBox = document.getElementById("uploadBox");
+			// Dropdown removed from UI; keep legacy references null
+			const billSelect = null;
+			const billSelector = document.getElementById("billSelector");
+			const content = document.getElementById("content");
+			const filesLoaded = document.getElementById("filesLoaded");
+			const billNavTop = document.getElementById('billNavTop');
+			const billNavBottom = document.getElementById('billNavBottom');
+			const prevTop = document.getElementById('prevTop');
+			const nextTop = document.getElementById('nextTop');
+			const prevBottom = document.getElementById('prevBottom');
+			const nextBottom = document.getElementById('nextBottom');
+			const billNavLabelTop = document.getElementById('billNavLabelTop');
+			const billNavLabelBottom = document.getElementById('billNavLabelBottom');
+
+			function updateNav() {
+				if (!billKeys.length || currentIndex < 0) {
+					billNavLabelTop.textContent = 'No bill loaded';
+					billNavLabelBottom.textContent = 'No bill loaded';
+					prevTop.disabled = prevBottom.disabled = nextTop.disabled = nextBottom.disabled = true;
+					return;
+				}
+				const key = billKeys[currentIndex];
+				const meta = billsData[key].metadata;
+				const label = `${(meta.state||'').toUpperCase()} – ${meta.bill_id} (${currentIndex+1}/${billKeys.length})`;
+				billNavLabelTop.textContent = label;
+				billNavLabelBottom.textContent = label;
+				prevTop.disabled = prevBottom.disabled = currentIndex === 0;
+				nextTop.disabled = nextBottom.disabled = currentIndex === billKeys.length - 1;
+			}
+
+			function showBillAt(index) {
+				if (index < 0 || index >= billKeys.length) return;
+				currentIndex = index;
+				displayBill(billsData[billKeys[currentIndex]]);
+				updateNav();
+			}
+
+			function prevBill() { if (currentIndex > 0) showBillAt(currentIndex - 1); }
+			function nextBill() { if (currentIndex < billKeys.length - 1) showBillAt(currentIndex + 1); }
+
+			prevTop.addEventListener('click', prevBill);
+			nextTop.addEventListener('click', nextBill);
+			prevBottom.addEventListener('click', prevBill);
+			nextBottom.addEventListener('click', nextBill);
+
+			document.addEventListener('keydown', (e) => {
+				if (e.key === 'ArrowLeft') { e.preventDefault(); prevBill(); }
+				else if (e.key === 'ArrowRight') { e.preventDefault(); nextBill(); }
+			});
+
+			uploadBox.addEventListener("click", (e) => {
+				if (e.target.tagName === "LABEL" || e.target.closest("label")) return;
+				fileInput.click();
+			});
+			uploadBox.addEventListener("dragover", (e) => {
+				e.preventDefault();
+				uploadBox.classList.add("dragover");
+			});
+			uploadBox.addEventListener("dragleave", () =>
+				uploadBox.classList.remove("dragover")
+			);
+			uploadBox.addEventListener("drop", (e) => {
+				e.preventDefault();
+				uploadBox.classList.remove("dragover");
+				handleFiles(e.dataTransfer.files);
+			});
+			fileInput.addEventListener("change", (e) => handleFiles(e.target.files));
+
+			async function handleFiles(files) {
+				billsData = {};
+				const txtFiles = Array.from(files).filter(f => f.name.endsWith('.txt'));
+				if (!txtFiles.length) { alert('Please upload .txt files from the spot_check folder'); return; }
+				for (const file of txtFiles) {
+					const text = await file.text();
+					const parsed = parseSpotCheckFile(text, file.name);
+					if (parsed) billsData[file.name] = parsed;
+				}
+				billKeys = Object.keys(billsData).sort();
+				filesLoaded.style.display = 'block';
+				filesLoaded.textContent = `Loaded ${billKeys.length} bill${billKeys.length > 1 ? 's' : ''}`;
+				billNavTop.style.display = billNavBottom.style.display = 'flex';
+				showBillAt(0);
+			}
+
+			function parseSpotCheckFile(text, fileName) {
+				try {
+					const lines = text.split("\n");
+					const metadata = {};
+					const chunks = [];
+					let inMetadata = true;
+					let currentChunk = null;
+					let chunkText = [];
+					for (let i = 0; i < lines.length; i++) {
+						const line = lines[i];
+						if (inMetadata) {
+							if (line.includes("State:"))
+								metadata.state = line.split(":")[1].trim();
+							else if (line.includes("Bill ID:"))
+								metadata.bill_id = line.split(":")[1].trim();
+							else if (line.includes("Unique ID:"))
+								metadata.unique_id = line.split(":")[1].trim();
+							else if (line.includes("Session:"))
+								metadata.session = line.split(":")[1].trim();
+							else if (line.includes("Bill Version:"))
+								metadata.bill_version = line.split(":")[1].trim();
+							else if (line.includes("Sunlight ID:"))
+								metadata.sunlight_id = line.split(":")[1].trim();
+							else if (line.includes("Total Chunks:"))
+								metadata.total_chunks = line.split(":")[1].trim();
+							else if (line.includes("Total Words:"))
+                                metadata.total_words = 0;
+							else if (line === "CHUNKS") inMetadata = false;
+							continue;
+						}
+						if (line.match(/^Chunk \d+/)) {
+							if (currentChunk) {
+								currentChunk.text = chunkText.join("\n").trim();
+								chunks.push(currentChunk);
+								chunkText = [];
+							}
+							const match = line.match(/Chunk (\d+) \(ID: (chunk_\d+)\)/);
+							if (match)
+								currentChunk = {
+									number: parseInt(match[1]),
+									id: match[2],
+									char_count: 0,
+								};
+						} else if (line.includes("Char Count:") && currentChunk) {
+							currentChunk.char_count = parseInt(line.split(":")[1].trim());
+						} else if (
+							currentChunk &&
+							!line.match(/^-{20,}/) &&
+							!line.match(/^={20,}/) &&
+							line.trim() !== ""
+						) {
+							chunkText.push(line);
+						}
+					}
+					if (currentChunk) {
+						currentChunk.text = chunkText.join("\n").trim();
+						chunks.push(currentChunk);
+					}
+                    // Compute total words
+                    metadata.total_words = chunks.reduce((sum, chunk) => {
+                        return sum + (chunk.text.split(/\s+/).length);
+                    }, 0);
+					return { metadata, chunks };
+				} catch (e) {
+					console.error(`Error parsing ${fileName}:`, e);
+					return null;
+				}
+			}
+
+            // Legacy dropdown listener removed
+
+			function displayBill(bill) {
+				const metadataEl = document.getElementById("metadata");
+				metadataEl.innerHTML = `
+            <div class="metadata-item"><span class="metadata-label">State:</span><span class="metadata-value">${bill.metadata.state}</span></div>
+            <div class="metadata-item"><span class="metadata-label">Bill ID:</span><span class="metadata-value">${bill.metadata.bill_id}</span></div>
+            <div class="metadata-item"><span class="metadata-label">Session:</span><span class="metadata-value">${bill.metadata.session}</span></div>
+            <div class="metadata-item"><span class="metadata-label">Version:</span><span class="metadata-value">${bill.metadata.bill_version}</span></div>
+            <div class="metadata-item"><span class="metadata-label">Total Chunks:</span><span class="metadata-value">${bill.metadata.total_chunks}</span></div>
+            <div class="metadata-item"><span class="metadata-label">Total Words:</span><span class="metadata-value">${bill.metadata.total_words}</span></div>
+        `;
+				const billText = document.getElementById("billText");
+				billText.innerHTML = "";
+				bill.chunks.forEach((chunk) => {
+					const wrapper = document.createElement("div");
+					wrapper.className = "chunk-wrapper";
+					const legend = document.createElement("div");
+					legend.className = "chunk-legend";
+					legend.innerHTML = `
+                <div class="chunk-legend-title">Chunk Info</div>
+                <div class="chunk-legend-item"><span class="chunk-legend-label">Chars:</span> ${chunk.char_count}</div>
+                <div class="chunk-legend-item"><span class="chunk-legend-label">Words:</span> ${chunk.text.split(/\s+/).length}</div>
+            `;
+					const textSpan = document.createElement("span");
+					textSpan.className = "chunk-text";
+					textSpan.textContent = chunk.text;
+					wrapper.appendChild(legend);
+					wrapper.appendChild(textSpan);
+					billText.appendChild(wrapper);
+				});
+				content.style.display = "block";
+			}
+		</script>
+    </body>
+</html>
+</html>

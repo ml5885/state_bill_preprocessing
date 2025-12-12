@@ -62,7 +62,21 @@ Requires the raw bills JSON and the OpenStates people directory for party affili
 - `boilerplate.py` - boilerplate detection and removal
 - `chunking.py` - bill text splitting logic
 - `create_final_df.py` - metadata augmentation
+- `spot_check_viewer.html` - interactive viewer for inspecting chunked bills
 - `requirements.txt` - Python dependencies
+
+## Spot Check Viewer
+
+The `spot_check_viewer.html` file allows you to visually inspect the quality of bill chunking. When you run `preprocess.py`, it creates a `spot_check` folder in the output directory containing sample bill files.
+
+To use the viewer:
+
+1. Open `spot_check_viewer.html` in a web browser
+2. Upload `.txt` files from the `spot_check` folder
+3. Navigate between bills using the arrow buttons or keyboard arrows
+4. Hover over chunks to see character and word counts
+
+This helps verify that bills are being chunked correctly and that boilerplate removal is working as expected.
 
 ## Output Format
 
